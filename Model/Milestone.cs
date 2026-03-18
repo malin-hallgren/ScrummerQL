@@ -11,6 +11,9 @@ namespace ScrummerQL.Model
         public DateOnly StartDate { get; set; }
         public DateOnly? EndDate { get; set; }
 
+        public int TotalPoints { get; set; }
+        public int CompletedPoints { get; set; }
+
         public List<Issue> Issues { get; set; }
     }
 }

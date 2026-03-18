@@ -1,20 +1,25 @@
 ﻿using System.Text.Json;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
+using ScrummerQL.Model;
 
 namespace ScrummerQL
 {
     internal class Program
     {
+        //malin-hallgren-chas/testteam10
+        //chas-challenge-2026/grupp-10/grupp-10-cc-2026
         static async Task Main(string[] args)
         {
             string query = @"
             query {
-              project(fullPath: ""chas-challenge-2026/grupp-10/grupp-10-cc-2026"") {
+              project(fullPath: ""malin-hallgren-chas/testteam10"") {
                 milestones(first: 10) {
                   nodes {
                     iid
                     title
+                    startDate
+                    dueDate
                   }
                 }
                 workItems(first: 50) {
@@ -35,6 +40,7 @@ namespace ScrummerQL
                           nodes {
                             iid
                             title
+                            state
                             widgets {
                               ... on WorkItemWidgetLabels {
                                 labels {
@@ -90,20 +96,40 @@ namespace ScrummerQL
                 .GetProperty("milestones")
                 .GetProperty("nodes");
 
-            foreach(var milestone in milestones.EnumerateArray())
-            {  Console.WriteLine(milestone.GetProperty("title").GetString()); }
+            List<Milestone> milestoneList = new List<Milestone>();
 
-            foreach (var item in workItems.EnumerateArray())
+            foreach(var milestone in milestones.EnumerateArray())
             {
-                if (!item.TryGetProperty("widgets", out var widgets))
-                    continue;
+                var startDateElement = milestone.GetProperty("startDate");
+                if (startDateElement.ValueKind == JsonValueKind.Null)
+                    continue; // or handle it another way
+
+                var newMilestone = new Milestone
+                {
+                    Id = int.Parse(milestone.GetProperty("iid").GetString()!),
+                    Title = milestone.GetProperty("title").GetString()!,
+                    StartDate = DateOnly.Parse(startDateElement.GetString()!),
+                    EndDate = milestone.GetProperty("dueDate").ValueKind == JsonValueKind.Null
+                        ? null
+                        : DateOnly.Parse(milestone.GetProperty("dueDate").GetString()!),
+                    Issues = new List<Issue>(),
+                    TotalPoints = 0,
+                    CompletedPoints = 0
+                };
+                milestoneList.Add(newMilestone);
+            }
+
+
+            foreach (var workItem in workItems.EnumerateArray())
+            {
+                var widgets = workItem.GetProperty("widgets");
 
                 var hasParent = false;
                 foreach (var widget in widgets.EnumerateArray())
                 {
-                    if (widget.TryGetProperty("hasParent", out var hp))
+                    if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
                     {
-                        hasParent = hp.GetBoolean();
+                        hasParent = true;
                         break;
                     }
                 }
@@ -111,21 +137,56 @@ namespace ScrummerQL
                 if (hasParent)
                     continue;
 
-                Console.WriteLine($"Work item: {item.GetProperty("title").GetString()}");
-
-                foreach (var widget in widgets.EnumerateArray())
+                var newIssue = new Issue
                 {
-                    if(widget.TryGetProperty("milestone", out var milestone) && milestone.ValueKind == JsonValueKind.Object)
+                    Id = int.Parse(workItem.GetProperty("iid").GetString()),
+                    Title = workItem.GetProperty("title").GetString(),
+                    State = workItem.GetProperty("state").GetString(),
+                    ChildIssues = new List<ChildIssue>()
+                };
+                if (workItem.TryGetProperty("widgets", out var widg))
+                {
+                    Milestone? issueMilestone = null;
+                    JsonElement childrenConnection = default;
+                    var hasChildren = false;
+
+                    foreach (var widget in widg.EnumerateArray())
                     {
-                        Console.WriteLine($"  Milestone: {milestone.GetProperty("title").GetString()}");
+                        if(widget.TryGetProperty("milestone", out var milestone) && milestone.ValueKind == JsonValueKind.Object)
+                        {
+                            var milestoneId = int.Parse(milestone.GetProperty("iid").GetString());
+                            issueMilestone = milestoneList.FirstOrDefault(m => m.Id == milestoneId);
+                        }
+
+                        if (widget.TryGetProperty("children", out var children))
+                        {
+                            childrenConnection = children;
+                            hasChildren = true;
+                        }
                     }
-                    if (!widget.TryGetProperty("children", out var childrenConnection))
+
+                    if (issueMilestone != null)
+                    {
+                        issueMilestone.Issues.Add(newIssue);
+                    }
+
+                    if (!hasChildren)
                         continue;
 
-                    foreach (var child in childrenConnection.GetProperty("nodes").EnumerateArray())
-                    {
+                    var childNodes = childrenConnection.GetProperty("nodes").EnumerateArray();
 
-                        Console.WriteLine($"  Child: {child.GetProperty("title").GetString()}");
+                    foreach (var child in childNodes)
+                    {
+                        var childIssue = new ChildIssue
+                        {
+                            Id = int.Parse(child.GetProperty("iid").GetString()!),
+                            Title = child.GetProperty("title").GetString()!,
+                            Points = 0,
+                            Team = "",
+                            Priority = "",
+                            Status = "",
+                            State = child.GetProperty("state").GetString()!
+                        };
 
                         if (!child.TryGetProperty("widgets", out var childWidgets))
                             continue;
@@ -138,19 +199,49 @@ namespace ScrummerQL
                                 continue;
                             }
 
-                            Console.WriteLine("\tLabels:");
-
                             foreach (var label in labelNodes.EnumerateArray())
                             {
-                                Console.WriteLine($"\t   {label.GetProperty("title").GetString()}");
+                                var title = label.GetProperty("title").GetString()?.ToLowerInvariant();
 
+                                if (string.IsNullOrWhiteSpace(title))
+                                {
+                                    continue;
+                                }
+
+                                if (int.TryParse(title, out var point))
+                                {
+                                    childIssue.Points = point;
+                                }
+                                if (title == "prio low" || title == "prio medium" || title == "prio high" || title == "prio critical")
+                                {
+                                    childIssue.Priority = title.Replace("prio ", "");
+                                }
+                                if (title == "ui/ux" || title == "backend" || title == "frontend" || title == "devops")
+                                {
+                                    childIssue.Team = title;
+                                }
+                                if (title == "active sprint" || title == "in progress" || title == "resolved")
+                                {
+                                    childIssue.Status = title;
+                                }
                             }
-                            Console.WriteLine();
-
                         }
+
+                        newIssue.ChildIssues.Add(childIssue);
+
+                        if (issueMilestone != null)
+                        {
+                            issueMilestone.TotalPoints += childIssue.Points;
+
+                            if (string.Equals(childIssue.State, "closed", StringComparison.OrdinalIgnoreCase))
+                                issueMilestone.CompletedPoints += childIssue.Points;
+                        }
+
                     }
                 }
             }
+
+            Printer.PrintByMilestone(milestoneList);
         }
     }
 }
