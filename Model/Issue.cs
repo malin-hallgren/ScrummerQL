@@ -12,5 +12,7 @@ namespace ScrummerQL.Model
         public string State { get; set; }
 
         public List<ChildIssue> ChildIssues { get; set; }
+
+        public int? inMilestoneWithId { get; set; }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using ScrummerQL.Model; 
 
@@ -29,18 +30,21 @@ namespace ScrummerQL
                     Console.WriteLine($"Milestone: {milestonesWithIssues[i].Title} (Start: {milestonesWithIssues[i].StartDate}, End: {(milestonesWithIssues[i].EndDate.HasValue ? milestonesWithIssues[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestonesWithIssues[i].CompletedPoints}/{milestonesWithIssues[i].TotalPoints})\n");
                 }
             }
-            //foreach (var milestone in milestonesWithIssues)
-            //{
-            //    Console.WriteLine($"Milestone: {milestone.Title} (Start: {milestone.StartDate}, End: {(milestone.EndDate.HasValue ? milestone.EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestone.CompletedPoints}/{milestone.TotalPoints})\n");
-            //    foreach (var issue in milestone.Issues)
-            //    {
-            //        Console.WriteLine($"- Issue: {issue.Title}\n   State: {issue.State}");
-            //        foreach (var childIssue in issue.ChildIssues)
-            //        {
-            //            Console.WriteLine($"    - Child Issue: {childIssue.Title}\n\tPoints: {childIssue.Points}\n\tTeam: {childIssue.Team}\n\tPriority: {childIssue.Priority}\n\tStatus: {childIssue.Status}\n\tState: {childIssue.State}\n");
-            //        }
-            //    }
-            //}
+        }
+
+        public static void PrintIssuesWithoutMilestone(List<Issue> issues)
+        {
+
+            Console.WriteLine("Issues without Milestone:\n");
+            foreach (var issue in issues)
+            {
+                
+                Console.WriteLine($"- Issue: {issue.Title}\n   State: {issue.State}");
+                foreach (var childIssue in issue.ChildIssues)
+                {
+                    Console.WriteLine($"    - Child Issue: {childIssue.Title}\n\tPoints: {childIssue.Points}\n\tTeam: {childIssue.Team}\n\tPriority: {childIssue.Priority}\n\tStatus: {childIssue.Status}\n\tState: {childIssue.State}\n");
+                }
+            }
         }
     }
 }

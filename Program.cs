@@ -13,7 +13,7 @@ namespace ScrummerQL
         {
             string query = @"
             query {
-              project(fullPath: ""malin-hallgren-chas/testteam10"") {
+              project(fullPath: ""chas-challenge-2026/grupp-10/grupp-10-cc-2026"") {
                 milestones(first: 10) {
                   nodes {
                     iid
@@ -22,7 +22,7 @@ namespace ScrummerQL
                     dueDate
                   }
                 }
-                workItems(first: 50) {
+                workItems(first: 100) {
                   nodes {
                     iid
                     title
@@ -120,17 +120,22 @@ namespace ScrummerQL
             }
 
 
+            List<Issue> allIssues = new List<Issue>();
+
             foreach (var workItem in workItems.EnumerateArray())
             {
-                var widgets = workItem.GetProperty("widgets");
+                var workItemId = int.Parse(workItem.GetProperty("iid").GetString()!);
 
                 var hasParent = false;
-                foreach (var widget in widgets.EnumerateArray())
+                if (workItem.TryGetProperty("widgets", out var widgets))
                 {
-                    if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
+                    foreach (var widget in widgets.EnumerateArray())
                     {
-                        hasParent = true;
-                        break;
+                        if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
+                        {
+                            hasParent = true;
+                            break;
+                        }
                     }
                 }
 
@@ -139,10 +144,11 @@ namespace ScrummerQL
 
                 var newIssue = new Issue
                 {
-                    Id = int.Parse(workItem.GetProperty("iid").GetString()),
+                    Id = workItemId,
                     Title = workItem.GetProperty("title").GetString(),
                     State = workItem.GetProperty("state").GetString(),
-                    ChildIssues = new List<ChildIssue>()
+                    ChildIssues = new List<ChildIssue>(),
+                    inMilestoneWithId = null
                 };
                 if (workItem.TryGetProperty("widgets", out var widg))
                 {
@@ -168,6 +174,7 @@ namespace ScrummerQL
                     if (issueMilestone != null)
                     {
                         issueMilestone.Issues.Add(newIssue);
+                        newIssue.inMilestoneWithId = issueMilestone.Id;
                     }
 
                     if (!hasChildren)
@@ -185,7 +192,8 @@ namespace ScrummerQL
                             Team = "",
                             Priority = "",
                             Status = "",
-                            State = child.GetProperty("state").GetString()!
+                            State = child.GetProperty("state").GetString()!,
+                            ParentIssueId = newIssue.Id
                         };
 
                         if (!child.TryGetProperty("widgets", out var childWidgets))
@@ -226,7 +234,6 @@ namespace ScrummerQL
                                 }
                             }
                         }
-
                         newIssue.ChildIssues.Add(childIssue);
 
                         if (issueMilestone != null)
@@ -239,9 +246,19 @@ namespace ScrummerQL
 
                     }
                 }
+
+                allIssues.Add(newIssue);
             }
 
-            Printer.PrintByMilestone(milestoneList);
+            var childIssueIds = allIssues
+                .SelectMany(x => x.ChildIssues)
+                .Select(x => x.Id)
+                .ToHashSet();
+
+            //Printer.PrintByMilestone(milestoneList);
+            Printer.PrintIssuesWithoutMilestone(
+                allIssues.Where(x => x.inMilestoneWithId == null && !childIssueIds.Contains(x.Id)).ToList()
+            );
         }
     }
 }
