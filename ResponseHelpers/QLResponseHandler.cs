@@ -4,13 +4,13 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 
-namespace ScrummerQL.Repositories
+namespace ScrummerQL.ResponseHelpers
 {
-    internal class ResponseRepository
+    internal class QLResponseHandler
     {
         private HttpClient _httpClient;
 
-        public ResponseRepository(HttpClient client)
+        public QLResponseHandler(HttpClient client)
         {
             _httpClient = client;
         }

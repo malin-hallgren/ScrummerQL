@@ -12,9 +12,12 @@ namespace ScrummerQL
         {
             for ( int i = 0; i < milestones.Count; i++ )
             {
+                Console.WriteLine($"Milestone: {milestones[i].Title} Start: {milestones[i].StartDate}, " +
+                    $"End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}" +
+                    $"Completed Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
+
                 if (i == milestones.Count - 1)
                 {
-                    Console.WriteLine($"Milestone: {milestones[i].Title} (Start: {milestones[i].StartDate}, End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
                     foreach (var issue in milestones[i].Issues)
                     {
                         Console.WriteLine($"- Issue: {issue.Title}\n   State: {issue.State}");
