@@ -8,14 +8,14 @@ namespace ScrummerQL
 {
     internal class Printer
     {
-        public static void PrintByMilestone(List<Milestone> milestonesWithIssues)
+        public static void PrintByMilestone(List<Milestone> milestones, List<Issue>  issues)
         {
-            for ( int i = 0; i < milestonesWithIssues.Count; i++ )
+            for ( int i = 0; i < milestones.Count; i++ )
             {
-                if (i == milestonesWithIssues.Count - 1)
+                if (i == milestones.Count - 1)
                 {
-                    Console.WriteLine($"Milestone: {milestonesWithIssues[i].Title} (Start: {milestonesWithIssues[i].StartDate}, End: {(milestonesWithIssues[i].EndDate.HasValue ? milestonesWithIssues[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestonesWithIssues[i].CompletedPoints}/{milestonesWithIssues[i].TotalPoints})\n");
-                    foreach (var issue in milestonesWithIssues[i].Issues)
+                    Console.WriteLine($"Milestone: {milestones[i].Title} (Start: {milestones[i].StartDate}, End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
+                    foreach (var issue in milestones[i].Issues)
                     {
                         Console.WriteLine($"- Issue: {issue.Title}\n   State: {issue.State}");
                         foreach (var childIssue in issue.ChildIssues)
@@ -27,7 +27,7 @@ namespace ScrummerQL
 
                 else
                 {
-                    Console.WriteLine($"Milestone: {milestonesWithIssues[i].Title} (Start: {milestonesWithIssues[i].StartDate}, End: {(milestonesWithIssues[i].EndDate.HasValue ? milestonesWithIssues[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestonesWithIssues[i].CompletedPoints}/{milestonesWithIssues[i].TotalPoints})\n");
+                    Console.WriteLine($"Milestone: {milestones[i].Title} (Start: {milestones[i].StartDate}, End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
                 }
             }
         }

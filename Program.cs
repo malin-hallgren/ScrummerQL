@@ -2,6 +2,7 @@
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using ScrummerQL.Model;
+using ScrummerQL.Repositories;
 
 namespace ScrummerQL
 {
@@ -18,6 +19,7 @@ namespace ScrummerQL
                   nodes {
                     iid
                     title
+                    state
                     startDate
                     dueDate
                   }
@@ -59,206 +61,187 @@ namespace ScrummerQL
               }
             }";
 
+
             var client = new HttpClient();
-            client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", File.ReadAllText("../../../.env"));
-            client.DefaultRequestHeaders.Add("GraphQL-Features", "sub_issues");
+            var repo = new ResponseRepository(client);
 
-            var body = new { query = query };
+            var json = await repo.GetResponseAsync(query);
 
-            var response = await client.PostAsJsonAsync(
-                "https://git.chas-lab.dev/api/graphql",
-                body
-            );
 
-            var json = await response.Content.ReadAsStringAsync();
-            //Console.WriteLine(json);
-
-            using var doc = JsonDocument.Parse(json);
-
-            if (doc.RootElement.TryGetProperty("errors", out var errors))
+            if (string.IsNullOrWhiteSpace(json))
             {
-                foreach (var error in errors.EnumerateArray())
-                    Console.WriteLine(error.GetProperty("message").GetString());
+                Console.WriteLine("Empty response returned from GraphQL.");
+                return;
+            }
+
+            GraphQLResponse? graphQlResponse;
+
+            try
+            {
+                graphQlResponse = JsonSerializer.Deserialize<GraphQLResponse>(
+                    json,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+            }
+            catch (JsonException ex)
+            {
+                Console.WriteLine($"Failed to deserialize GraphQL response: {ex.Message}");
+                Console.WriteLine(json);
+                return;
+            }
+
+            if (graphQlResponse?.errors != null)
+            {
+                foreach (var error in graphQlResponse.errors)
+                    Console.WriteLine(error.message);
 
                 return;
             }
 
-            var workItems = doc.RootElement
-                .GetProperty("data")
-                .GetProperty("project")
-                .GetProperty("workItems")
-                .GetProperty("nodes");
+            var (milestoneList, issueList) = Parser.Parse(graphQlResponse!);
 
-            var milestones = doc.RootElement
-                .GetProperty("data")
-                .GetProperty("project")
-                .GetProperty("milestones")
-                .GetProperty("nodes");
+            Printer.PrintByMilestone(milestoneList, issueList);
+            //Printer.PrintIssuesWithoutMilestone(issueList.Where(x => x.inMilestoneWithId == null).ToList());
 
-            List<Milestone> milestoneList = new List<Milestone>();
+            //foreach (var workItem in workItems.EnumerateArray())
+            //{
+            //    var workItemId = int.Parse(workItem.GetProperty("iid").GetString()!);
 
-            foreach(var milestone in milestones.EnumerateArray())
-            {
-                var startDateElement = milestone.GetProperty("startDate");
-                if (startDateElement.ValueKind == JsonValueKind.Null)
-                    continue; // or handle it another way
+            //    var hasParent = false;
+            //    if (workItem.TryGetProperty("widgets", out var widgets))
+            //    {
+            //        foreach (var widget in widgets.EnumerateArray())
+            //        {
+            //            if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
+            //            {
+            //                hasParent = true;
+            //                break;
+            //            }
+            //        }
+            //    }
 
-                var newMilestone = new Milestone
-                {
-                    Id = int.Parse(milestone.GetProperty("iid").GetString()!),
-                    Title = milestone.GetProperty("title").GetString()!,
-                    StartDate = DateOnly.Parse(startDateElement.GetString()!),
-                    EndDate = milestone.GetProperty("dueDate").ValueKind == JsonValueKind.Null
-                        ? null
-                        : DateOnly.Parse(milestone.GetProperty("dueDate").GetString()!),
-                    Issues = new List<Issue>(),
-                    TotalPoints = 0,
-                    CompletedPoints = 0
-                };
-                milestoneList.Add(newMilestone);
-            }
+            //    if (hasParent)
+            //        continue;
 
+            //    var newIssue = new Issue
+            //    {
+            //        Id = workItemId,
+            //        Title = workItem.GetProperty("title").GetString(),
+            //        State = workItem.GetProperty("state").GetString(),
+            //        ChildIssues = new List<ChildIssue>(),
+            //        inMilestoneWithId = null
+            //    };
+            //    if (workItem.TryGetProperty("widgets", out var widg))
+            //    {
+            //        Milestone? issueMilestone = null;
+            //        JsonElement childrenConnection = default;
+            //        var hasChildren = false;
 
-            List<Issue> allIssues = new List<Issue>();
+            //        foreach (var widget in widg.EnumerateArray())
+            //        {
+            //            if(widget.TryGetProperty("milestone", out var milestone) && milestone.ValueKind == JsonValueKind.Object)
+            //            {
+            //                var milestoneId = int.Parse(milestone.GetProperty("iid").GetString());
+            //                issueMilestone = milestoneList.FirstOrDefault(m => m.Id == milestoneId);
+            //            }
 
-            foreach (var workItem in workItems.EnumerateArray())
-            {
-                var workItemId = int.Parse(workItem.GetProperty("iid").GetString()!);
+            //            if (widget.TryGetProperty("children", out var children))
+            //            {
+            //                childrenConnection = children;
+            //                hasChildren = true;
+            //            }
+            //        }
 
-                var hasParent = false;
-                if (workItem.TryGetProperty("widgets", out var widgets))
-                {
-                    foreach (var widget in widgets.EnumerateArray())
-                    {
-                        if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
-                        {
-                            hasParent = true;
-                            break;
-                        }
-                    }
-                }
+            //        if (issueMilestone != null)
+            //        {
+            //            issueMilestone.Issues.Add(newIssue);
+            //            newIssue.inMilestoneWithId = issueMilestone.Id;
+            //        }
 
-                if (hasParent)
-                    continue;
+            //        if (!hasChildren)
+            //            continue;
 
-                var newIssue = new Issue
-                {
-                    Id = workItemId,
-                    Title = workItem.GetProperty("title").GetString(),
-                    State = workItem.GetProperty("state").GetString(),
-                    ChildIssues = new List<ChildIssue>(),
-                    inMilestoneWithId = null
-                };
-                if (workItem.TryGetProperty("widgets", out var widg))
-                {
-                    Milestone? issueMilestone = null;
-                    JsonElement childrenConnection = default;
-                    var hasChildren = false;
+            //        var childNodes = childrenConnection.GetProperty("nodes").EnumerateArray();
 
-                    foreach (var widget in widg.EnumerateArray())
-                    {
-                        if(widget.TryGetProperty("milestone", out var milestone) && milestone.ValueKind == JsonValueKind.Object)
-                        {
-                            var milestoneId = int.Parse(milestone.GetProperty("iid").GetString());
-                            issueMilestone = milestoneList.FirstOrDefault(m => m.Id == milestoneId);
-                        }
+            //        foreach (var child in childNodes)
+            //        {
+            //            var childIssue = new ChildIssue
+            //            {
+            //                Id = int.Parse(child.GetProperty("iid").GetString()!),
+            //                Title = child.GetProperty("title").GetString()!,
+            //                Points = 0,
+            //                Team = "",
+            //                Priority = "",
+            //                Status = "",
+            //                State = child.GetProperty("state").GetString()!,
+            //                ParentIssueId = newIssue.Id
+            //            };
 
-                        if (widget.TryGetProperty("children", out var children))
-                        {
-                            childrenConnection = children;
-                            hasChildren = true;
-                        }
-                    }
+            //            if (!child.TryGetProperty("widgets", out var childWidgets))
+            //                continue;
 
-                    if (issueMilestone != null)
-                    {
-                        issueMilestone.Issues.Add(newIssue);
-                        newIssue.inMilestoneWithId = issueMilestone.Id;
-                    }
+            //            foreach (var innerwidget in childWidgets.EnumerateArray())
+            //            {
+            //                if (!innerwidget.TryGetProperty("labels", out var labelsWidget) ||
+            //                    !labelsWidget.TryGetProperty("nodes", out var labelNodes))
+            //                {
+            //                    continue;
+            //                }
 
-                    if (!hasChildren)
-                        continue;
+            //                foreach (var label in labelNodes.EnumerateArray())
+            //                {
+            //                    var title = label.GetProperty("title").GetString()?.ToLowerInvariant();
 
-                    var childNodes = childrenConnection.GetProperty("nodes").EnumerateArray();
+            //                    if (string.IsNullOrWhiteSpace(title))
+            //                    {
+            //                        continue;
+            //                    }
 
-                    foreach (var child in childNodes)
-                    {
-                        var childIssue = new ChildIssue
-                        {
-                            Id = int.Parse(child.GetProperty("iid").GetString()!),
-                            Title = child.GetProperty("title").GetString()!,
-                            Points = 0,
-                            Team = "",
-                            Priority = "",
-                            Status = "",
-                            State = child.GetProperty("state").GetString()!,
-                            ParentIssueId = newIssue.Id
-                        };
+            //                    if (int.TryParse(title, out var point))
+            //                    {
+            //                        childIssue.Points = point;
+            //                    }
+            //                    if (title == "prio low" || title == "prio medium" || title == "prio high" || title == "prio critical")
+            //                    {
+            //                        childIssue.Priority = title.Replace("prio ", "");
+            //                    }
+            //                    if (title == "ui/ux" || title == "backend" || title == "frontend" || title == "devops")
+            //                    {
+            //                        childIssue.Team = title;
+            //                    }
+            //                    if (title == "active sprint" || title == "in progress" || title == "resolved")
+            //                    {
+            //                        childIssue.Status = title;
+            //                    }
+            //                }
+            //            }
+            //            newIssue.ChildIssues.Add(childIssue);
 
-                        if (!child.TryGetProperty("widgets", out var childWidgets))
-                            continue;
+            //            if (issueMilestone != null)
+            //            {
+            //                issueMilestone.TotalPoints += childIssue.Points;
 
-                        foreach (var innerwidget in childWidgets.EnumerateArray())
-                        {
-                            if (!innerwidget.TryGetProperty("labels", out var labelsWidget) ||
-                                !labelsWidget.TryGetProperty("nodes", out var labelNodes))
-                            {
-                                continue;
-                            }
+            //                if (string.Equals(childIssue.State, "closed", StringComparison.OrdinalIgnoreCase))
+            //                    issueMilestone.CompletedPoints += childIssue.Points;
+            //            }
 
-                            foreach (var label in labelNodes.EnumerateArray())
-                            {
-                                var title = label.GetProperty("title").GetString()?.ToLowerInvariant();
+            //        }
+            //    }
 
-                                if (string.IsNullOrWhiteSpace(title))
-                                {
-                                    continue;
-                                }
+            //    allIssues.Add(newIssue);
+            //}
 
-                                if (int.TryParse(title, out var point))
-                                {
-                                    childIssue.Points = point;
-                                }
-                                if (title == "prio low" || title == "prio medium" || title == "prio high" || title == "prio critical")
-                                {
-                                    childIssue.Priority = title.Replace("prio ", "");
-                                }
-                                if (title == "ui/ux" || title == "backend" || title == "frontend" || title == "devops")
-                                {
-                                    childIssue.Team = title;
-                                }
-                                if (title == "active sprint" || title == "in progress" || title == "resolved")
-                                {
-                                    childIssue.Status = title;
-                                }
-                            }
-                        }
-                        newIssue.ChildIssues.Add(childIssue);
-
-                        if (issueMilestone != null)
-                        {
-                            issueMilestone.TotalPoints += childIssue.Points;
-
-                            if (string.Equals(childIssue.State, "closed", StringComparison.OrdinalIgnoreCase))
-                                issueMilestone.CompletedPoints += childIssue.Points;
-                        }
-
-                    }
-                }
-
-                allIssues.Add(newIssue);
-            }
-
-            var childIssueIds = allIssues
-                .SelectMany(x => x.ChildIssues)
-                .Select(x => x.Id)
-                .ToHashSet();
+            //var childIssueIds = allIssues
+            //    .SelectMany(x => x.ChildIssues)
+            //    .Select(x => x.Id)
+            //    .ToHashSet();
 
             //Printer.PrintByMilestone(milestoneList);
-            Printer.PrintIssuesWithoutMilestone(
-                allIssues.Where(x => x.inMilestoneWithId == null && !childIssueIds.Contains(x.Id)).ToList()
-            );
+            //Printer.PrintIssuesWithoutMilestone(
+            //    allIssues.Where(x => x.inMilestoneWithId == null && !childIssueIds.Contains(x.Id)).ToList()
+            //);
         }
     }
 }
