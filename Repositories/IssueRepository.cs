@@ -45,9 +45,20 @@ namespace ScrummerQL.Repositories
             }
         }
 
-        public async Task<bool> ExistsAsync(int id)
+        public async Task<bool> ExistsByGitLabIIdAsync(int id)
         {
-            return await _context.Issues.AnyAsync(i => i.Id == id);
+            return await _context.Issues.AnyAsync(i => i.GitLabIId == id);
+        }
+
+        public async Task<Issue?> GetByGitLabIIdAsync(int gitLabIId)
+        {
+            return await _context.Issues.FirstOrDefaultAsync(i => i.GitLabIId == gitLabIId);
+        }
+
+        public async Task SaveChildIssuesAsync(List<ChildIssue> childIssues)
+        {
+            await _context.ChildIssues.AddRangeAsync(childIssues);
+            await _context.SaveChangesAsync();
         }
     }
 }

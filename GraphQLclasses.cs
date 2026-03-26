@@ -4,11 +4,11 @@ namespace ScrummerQL
 {
     public class GraphQLResponse
     {
-        public Data? data { get; set; }
+        public QLData? data { get; set; }
         public List<GraphQLError>? errors { get; set; }
     }
 
-    public class Data
+    public class QLData
     {
         public Project? project { get; set; }
     }

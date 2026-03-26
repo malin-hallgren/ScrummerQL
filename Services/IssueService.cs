@@ -2,12 +2,18 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using ScrummerQL.Repositories;
 
 namespace ScrummerQL.Services
 {
     internal class IssueService : IIssueService
     {
+        private readonly IIssueRepository? _repository;
 
+        public IssueService(IIssueRepository? repository = null)
+        {
+            _repository = repository;
+        }
         public List<Issue> GetIssues(GraphQLResponse response)
         {
             List<Issue> issueList = new List<Issue>();
@@ -62,8 +68,8 @@ namespace ScrummerQL.Services
 
                         var childIssue = new ChildIssue
                         {
-                            Id = childId,
-                            ParentIssueId = nodeId,
+                            GitLabIId = childId,
+                            ParentIssueGitLabIId = nodeId,
                             Title = childNode.title,
                             State = childNode.state,
                             Points = 0,
@@ -110,7 +116,7 @@ namespace ScrummerQL.Services
 
                 var issue = new Issue
                 {
-                    Id = nodeId,
+                    GitLabIId = nodeId,
                     Title = node.title,
                     State = node.state,
                     ChildIssues = currentChildren,
@@ -121,6 +127,82 @@ namespace ScrummerQL.Services
             }
 
             return issueList;
+        }
+
+        public async Task SaveIssuesAsync(List<Issue> issues)
+        {
+            if (_repository == null)
+            {
+                throw new InvalidOperationException("Repository is not initialized.");
+            }
+
+            foreach (var issue in issues)
+            {
+                // Prevent cascading save of child issues when adding/updating the parent.
+                // Create a shallow copy containing only scalar (DB) properties and save that
+                // so EF won't traverse the navigation collection.
+                var savedChildren = issue.ChildIssues;
+                try
+                {
+                    var parentOnly = new Issue
+                    {
+                        Id = issue.Id,
+                        GitLabIId = issue.GitLabIId,
+                        Title = issue.Title,
+                        State = issue.State,
+                        inMilestoneWithId = issue.inMilestoneWithId
+                    };
+
+                    if (await _repository.ExistsByGitLabIIdAsync(parentOnly.GitLabIId))
+                    {
+                        if (parentOnly.State.ToLower() != "closed")
+                        {
+                            await _repository.UpdateAsync(parentOnly);
+                        }
+                    }
+                    else
+                    {
+                        await _repository.AddAsync(parentOnly);
+                        // propagate generated Id back to the original instance
+                        issue.Id = parentOnly.Id;
+                    }
+                }
+                finally
+                {
+                    issue.ChildIssues = savedChildren;
+                }
+            }
+        }
+
+        public async Task SaveChildIssuesAsync(List<Issue> issues)
+        {
+            if (_repository == null)
+            {
+                throw new InvalidOperationException("Repository is not initialized.");
+            }
+
+            var allChildIssues = new List<ChildIssue>();
+
+            foreach (var issue in issues)
+            {
+                if (issue.ChildIssues == null || issue.ChildIssues.Count == 0)
+                    continue;
+
+                foreach (var childIssue in issue.ChildIssues)
+                {
+                    var parentIssue = await _repository.GetByGitLabIIdAsync(childIssue.ParentIssueGitLabIId.Value);
+                    if (parentIssue != null)
+                    {
+                        childIssue.ParentIssueId = parentIssue.Id;
+                        allChildIssues.Add(childIssue);
+                    }
+                }
+            }
+
+            if (allChildIssues.Count > 0)
+            {
+                await _repository.SaveChildIssuesAsync(allChildIssues);
+            }
         }
 
     }

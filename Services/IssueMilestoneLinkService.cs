@@ -11,7 +11,7 @@ namespace ScrummerQL.Services
         {
             foreach (var milestone in milestones)
             {
-                milestone.Issues = issues.Where(i => i.inMilestoneWithId == milestone.Id).ToList();
+                milestone.Issues = issues.Where(i => i.inMilestoneWithId == milestone.GitLabIId).ToList();
                 milestone.TotalPoints = milestone.Issues.Sum(i => i.ChildIssues.Sum(ci => ci.Points));
 
                 foreach (var issue in milestone.Issues)
@@ -23,7 +23,7 @@ namespace ScrummerQL.Services
                             milestone.CompletedPoints += childIssue.Points;
                         }
                     }
-                    
+
                 }
             }
         }

@@ -14,10 +14,10 @@ namespace ScrummerQL.ResponseHelpers
         {
             _httpClient = client;
         }
-        public async Task<string> GetResponseAsync(string query)
+        public async Task<string> GetResponseAsync(string query, string token)
         {
             _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", File.ReadAllText("../../../.env"));
+                new AuthenticationHeaderValue("Bearer", token);
             _httpClient.DefaultRequestHeaders.Add("GraphQL-Features", "sub_issues");
 
             var body = new { query = query };

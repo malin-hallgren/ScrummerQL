@@ -8,19 +8,20 @@ using ScrummerQL.ResponseHelpers;
 using ScrummerQL.Data;
 using Microsoft.EntityFrameworkCore;
 using ScrummerQL.Repositories;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 
 namespace ScrummerQL
 {
     internal class Program
     {
-        //malin-hallgren-chas/testteam10
-        //chas-challenge-2026/grupp-10/grupp-10-cc-2026
         static async Task Main(string[] args)
         {
-            string query = @"
+            var (token, gitlabUrl, connectionString) = EnvConfig.Config();
+
+            string query = $$"""
             query {
-              project(fullPath: ""malin-hallgren-chas/testteam10"") {
+              project(fullPath: "{{gitlabUrl}}") {
                 milestones(first: 10) {
                   nodes {
                     iid
@@ -65,29 +66,38 @@ namespace ScrummerQL
                   }
                 }
               }
-            }";
+            }
+            """;
+
+
 
             var services = new ServiceCollection();
 
             services.AddHttpClient<QLResponseHandler>();
-            services.AddSingleton<IIssueService, IssueService>();
-            services.AddSingleton<IMilestoneService, MilestoneService>();
-            services.AddSingleton<IIssueMilestoneLinkService, IssueMilestoneLinkService>();
+            services.AddScoped<IIssueService, IssueService>();
+            services.AddScoped<IMilestoneService, MilestoneService>();
+            services.AddScoped<IIssueMilestoneLinkService, IssueMilestoneLinkService>();
 
-            services.AddDbContext<ScrummerQLDbContext>();
+            services.AddDbContext<ScrummerQLDbContext>((options) =>
+            {
+                options.UseSqlServer(connectionString);
+            });
+
             services.AddScoped<IIssueRepository, IssueRepository>();
             services.AddScoped<IMilestoneRepository, MilestoneRepository>();
 
 
-
             using var  provider = services.BuildServiceProvider();
+
+            using var scope = provider.CreateScope();
+            var scopedProvider = scope.ServiceProvider;
 
             var qlHandler = provider.GetRequiredService<QLResponseHandler>();
             var issueService = provider.GetRequiredService<IIssueService>();
             var milestoneService = provider.GetRequiredService<IMilestoneService>();
             var linkService = provider.GetRequiredService<IIssueMilestoneLinkService>();
 
-            var json = await qlHandler.GetResponseAsync(query);
+            var json = await qlHandler.GetResponseAsync(query, token);
 
 
             if (string.IsNullOrWhiteSpace(json))
@@ -111,7 +121,12 @@ namespace ScrummerQL
 
             linkService.LinkIssuesToMilestones(issueList, milestoneList);
 
-            //var (milestoneList, issueList) = Parser.Parse(graphQlResponse!);
+            await milestoneService.SaveClosedMilestonesAsync(milestoneList);
+            await issueService.SaveIssuesAsync(issueList);
+
+            var allChildIssues = issueList.SelectMany(i => i.ChildIssues).ToList();
+
+            await issueService.SaveChildIssuesAsync(issueList);
 
             Printer.PrintByMilestone(milestoneList);
         }

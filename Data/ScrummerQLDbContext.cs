@@ -12,9 +12,9 @@ namespace ScrummerQL.Data
         public DbSet<Milestone> Milestones { get; set; }
         public DbSet<ChildIssue> ChildIssues { get; set; }
 
-        public ScrummerQlDbContext(DbContextOptionsBuilder<ScrummerQLDbContext> options) : base(options)
+        public ScrummerQLDbContext(DbContextOptions<ScrummerQLDbContext> options)
+       : base(options)
         {
-
         }
     }
 }

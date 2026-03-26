@@ -10,8 +10,8 @@ namespace ScrummerQL.Repositories
         Task<Milestone?> GetByIdAsync(int id);
         Task<List<Milestone>> GetAllAsync();
         Task AddAsync(Milestone milestone);
-        Task UpdatAsync(Milestone milestone);
+        Task UpdateAsync(Milestone milestone);
         Task DeleteAsync(int id);
-        Task<bool> ExistsAsync(int id);
+        Task<bool> ExistsByGitLabIIdAsync(int id);
     }
 }
