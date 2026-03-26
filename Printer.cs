@@ -8,13 +8,13 @@ namespace ScrummerQL
 {
     internal class Printer
     {
-        public static void PrintByMilestone(List<Milestone> milestones, List<Issue>  issues)
+        public static void PrintByMilestone(List<Milestone> milestones)
         {
             for ( int i = 0; i < milestones.Count; i++ )
             {
                 Console.WriteLine($"Milestone: {milestones[i].Title} Start: {milestones[i].StartDate}, " +
                     $"End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}" +
-                    $"Completed Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
+                    $"\nCompleted Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints}\n");
 
                 if (i == milestones.Count - 1)
                 {
@@ -26,11 +26,6 @@ namespace ScrummerQL
                             Console.WriteLine($"    - Child Issue: {childIssue.Title}\n\tPoints: {childIssue.Points}\n\tTeam: {childIssue.Team}\n\tPriority: {childIssue.Priority}\n\tStatus: {childIssue.Status}\n\tState: {childIssue.State}\n");
                         }
                     }
-                }
-
-                else
-                {
-                    Console.WriteLine($"Milestone: {milestones[i].Title} (Start: {milestones[i].StartDate}, End: {(milestones[i].EndDate.HasValue ? milestones[i].EndDate.Value.ToString() : "N/A")}\nCompleted Points: {milestones[i].CompletedPoints}/{milestones[i].TotalPoints})\n");
                 }
             }
         }

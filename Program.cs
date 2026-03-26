@@ -5,6 +5,9 @@ using ScrummerQL.Model;
 using Microsoft.Extensions.DependencyInjection;
 using ScrummerQL.Services;
 using ScrummerQL.ResponseHelpers;
+using ScrummerQL.Data;
+using Microsoft.EntityFrameworkCore;
+using ScrummerQL.Repositories;
 
 
 namespace ScrummerQL
@@ -17,7 +20,7 @@ namespace ScrummerQL
         {
             string query = @"
             query {
-              project(fullPath: ""chas-challenge-2026/grupp-10/grupp-10-cc-2026"") {
+              project(fullPath: ""malin-hallgren-chas/testteam10"") {
                 milestones(first: 10) {
                   nodes {
                     iid
@@ -68,8 +71,13 @@ namespace ScrummerQL
 
             services.AddHttpClient<QLResponseHandler>();
             services.AddSingleton<IIssueService, IssueService>();
-            services.AddSingleton<IMilestoneService, MilestoneService>();   
+            services.AddSingleton<IMilestoneService, MilestoneService>();
             services.AddSingleton<IIssueMilestoneLinkService, IssueMilestoneLinkService>();
+
+            services.AddDbContext<ScrummerQLDbContext>();
+            services.AddScoped<IIssueRepository, IssueRepository>();
+            services.AddScoped<IMilestoneRepository, MilestoneRepository>();
+
 
 
             using var  provider = services.BuildServiceProvider();
@@ -105,7 +113,7 @@ namespace ScrummerQL
 
             //var (milestoneList, issueList) = Parser.Parse(graphQlResponse!);
 
-            Printer.PrintByMilestone(milestoneList, issueList);
+            Printer.PrintByMilestone(milestoneList);
         }
     }
 }
