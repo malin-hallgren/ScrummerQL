@@ -2,27 +2,40 @@
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using ScrummerQL.Model;
+using Microsoft.Extensions.DependencyInjection;
+using ScrummerQL.Services;
+using ScrummerQL.ResponseHelpers;
+using ScrummerQL.Data;
+using Microsoft.EntityFrameworkCore;
+using ScrummerQL.Repositories;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+
 
 namespace ScrummerQL
 {
     internal class Program
     {
-        //malin-hallgren-chas/testteam10
-        //chas-challenge-2026/grupp-10/grupp-10-cc-2026
         static async Task Main(string[] args)
         {
-            string query = @"
+            var (token, gitlabUrl, connectionString) = EnvConfig.Config();
+
+            string query = $$"""
             query {
-              project(fullPath: ""chas-challenge-2026/grupp-10/grupp-10-cc-2026"") {
-                milestones(first: 10) {
+              project(fullPath: "{{gitlabUrl}}") {
+                milestones(first: 5, state: active) {
                   nodes {
                     iid
                     title
+                    state
                     startDate
                     dueDate
                   }
                 }
                 workItems(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                   nodes {
                     iid
                     title
@@ -32,6 +45,7 @@ namespace ScrummerQL
                         milestone {
                           iid
                           title
+                          state
                         }
                       }
                       ... on WorkItemWidgetHierarchy {
@@ -57,208 +71,135 @@ namespace ScrummerQL
                   }
                 }
               }
-            }";
+            }
+            """;
 
-            var client = new HttpClient();
-            client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", File.ReadAllText("../../../.env"));
-            client.DefaultRequestHeaders.Add("GraphQL-Features", "sub_issues");
 
-            var body = new { query = query };
 
-            var response = await client.PostAsJsonAsync(
-                "https://git.chas-lab.dev/api/graphql",
-                body
-            );
+            var services = new ServiceCollection();
 
-            var json = await response.Content.ReadAsStringAsync();
-            //Console.WriteLine(json);
+            services.AddHttpClient<QLResponseHandler>();
+            services.AddScoped<IIssueService, IssueService>();
+            services.AddScoped<IMilestoneService, MilestoneService>();
+            services.AddScoped<IIssueMilestoneLinkService, IssueMilestoneLinkService>();
 
-            using var doc = JsonDocument.Parse(json);
-
-            if (doc.RootElement.TryGetProperty("errors", out var errors))
+            services.AddDbContext<ScrummerQLDbContext>((options) =>
             {
-                foreach (var error in errors.EnumerateArray())
-                    Console.WriteLine(error.GetProperty("message").GetString());
+                options.UseSqlServer(connectionString, sqlServerOptionsAction =>
+                {
+                    sqlServerOptionsAction.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorNumbersToAdd: null
+                    );
+                });
+            });
+
+            services.AddScoped<IIssueRepository, IssueRepository>();
+            services.AddScoped<IMilestoneRepository, MilestoneRepository>();
+
+
+            using var  provider = services.BuildServiceProvider();
+
+            using var scope = provider.CreateScope();
+            var scopedProvider = scope.ServiceProvider;
+
+            var qlHandler = provider.GetRequiredService<QLResponseHandler>();
+            var issueService = provider.GetRequiredService<IIssueService>();
+            var milestoneService = provider.GetRequiredService<IMilestoneService>();
+            var linkService = provider.GetRequiredService<IIssueMilestoneLinkService>();
+
+            var json = await qlHandler.GetResponseAsync(query, token);
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                Console.WriteLine("Empty response returned from GraphQL.");
+                return;
+            }
+
+            GraphQLResponse? graphQlResponse = QLResponseValidator.ValidateResponse(json);
+
+            if (graphQlResponse == null)
+            {
+                Console.WriteLine("Failed to deserialize GraphQL response.");
+                return;
+            }
+
+            if (graphQlResponse.errors != null)
+            {
+                foreach (var error in graphQlResponse.errors)
+                    Console.WriteLine(error.message);
 
                 return;
             }
 
-            var workItems = doc.RootElement
-                .GetProperty("data")
-                .GetProperty("project")
-                .GetProperty("workItems")
-                .GetProperty("nodes");
+            var milestoneList = milestoneService.GetMilestones(graphQlResponse);
 
-            var milestones = doc.RootElement
-                .GetProperty("data")
-                .GetProperty("project")
-                .GetProperty("milestones")
-                .GetProperty("nodes");
+            // Filter to only non-expired milestones
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var openMilestoneList = milestoneList.Where(m => !m.EndDate.HasValue || m.EndDate >= today).ToList();
 
-            List<Milestone> milestoneList = new List<Milestone>();
 
-            foreach(var milestone in milestones.EnumerateArray())
+            var allIssues = new List<Issue>();
+            var issues = issueService.GetIssues(graphQlResponse);
+
+            // Filter to only issues in the milestone
+            var openMilestoneIds = openMilestoneList.Select(m => m.GitLabIId).ToHashSet();
+            var filteredIssues = issues.Where(i => i.inMilestoneWithId.HasValue && openMilestoneIds.Contains(i.inMilestoneWithId.Value)).ToList();
+
+            allIssues.AddRange(filteredIssues);
+
+            string? endCursor = Pager.ExtractEndCursor(graphQlResponse);
+            bool hasNextPage = Pager.ExtractHasNextPage(graphQlResponse);
+
+            while (hasNextPage)
             {
-                var startDateElement = milestone.GetProperty("startDate");
-                if (startDateElement.ValueKind == JsonValueKind.Null)
-                    continue; // or handle it another way
+                string paginatedQuery = query.Replace("workItems(first: 100)", $"workItems(first: 100, after: \"{endCursor}\")");
 
-                var newMilestone = new Milestone
+                json = await qlHandler.GetResponseAsync(paginatedQuery, token);
+
+                if (string.IsNullOrWhiteSpace(json))
                 {
-                    Id = int.Parse(milestone.GetProperty("iid").GetString()!),
-                    Title = milestone.GetProperty("title").GetString()!,
-                    StartDate = DateOnly.Parse(startDateElement.GetString()!),
-                    EndDate = milestone.GetProperty("dueDate").ValueKind == JsonValueKind.Null
-                        ? null
-                        : DateOnly.Parse(milestone.GetProperty("dueDate").GetString()!),
-                    Issues = new List<Issue>(),
-                    TotalPoints = 0,
-                    CompletedPoints = 0
-                };
-                milestoneList.Add(newMilestone);
-            }
-
-
-            List<Issue> allIssues = new List<Issue>();
-
-            foreach (var workItem in workItems.EnumerateArray())
-            {
-                var workItemId = int.Parse(workItem.GetProperty("iid").GetString()!);
-
-                var hasParent = false;
-                if (workItem.TryGetProperty("widgets", out var widgets))
-                {
-                    foreach (var widget in widgets.EnumerateArray())
-                    {
-                        if (widget.TryGetProperty("hasParent", out var hp) && hp.GetBoolean())
-                        {
-                            hasParent = true;
-                            break;
-                        }
-                    }
+                    Console.WriteLine("Empty response returned from GraphQL.");
+                    break;
                 }
 
-                if (hasParent)
-                    continue;
+                graphQlResponse = QLResponseValidator.ValidateResponse(json);
 
-                var newIssue = new Issue
+                if (graphQlResponse.errors != null)
                 {
-                    Id = workItemId,
-                    Title = workItem.GetProperty("title").GetString(),
-                    State = workItem.GetProperty("state").GetString(),
-                    ChildIssues = new List<ChildIssue>(),
-                    inMilestoneWithId = null
-                };
-                if (workItem.TryGetProperty("widgets", out var widg))
-                {
-                    Milestone? issueMilestone = null;
-                    JsonElement childrenConnection = default;
-                    var hasChildren = false;
-
-                    foreach (var widget in widg.EnumerateArray())
-                    {
-                        if(widget.TryGetProperty("milestone", out var milestone) && milestone.ValueKind == JsonValueKind.Object)
-                        {
-                            var milestoneId = int.Parse(milestone.GetProperty("iid").GetString());
-                            issueMilestone = milestoneList.FirstOrDefault(m => m.Id == milestoneId);
-                        }
-
-                        if (widget.TryGetProperty("children", out var children))
-                        {
-                            childrenConnection = children;
-                            hasChildren = true;
-                        }
-                    }
-
-                    if (issueMilestone != null)
-                    {
-                        issueMilestone.Issues.Add(newIssue);
-                        newIssue.inMilestoneWithId = issueMilestone.Id;
-                    }
-
-                    if (!hasChildren)
-                        continue;
-
-                    var childNodes = childrenConnection.GetProperty("nodes").EnumerateArray();
-
-                    foreach (var child in childNodes)
-                    {
-                        var childIssue = new ChildIssue
-                        {
-                            Id = int.Parse(child.GetProperty("iid").GetString()!),
-                            Title = child.GetProperty("title").GetString()!,
-                            Points = 0,
-                            Team = "",
-                            Priority = "",
-                            Status = "",
-                            State = child.GetProperty("state").GetString()!,
-                            ParentIssueId = newIssue.Id
-                        };
-
-                        if (!child.TryGetProperty("widgets", out var childWidgets))
-                            continue;
-
-                        foreach (var innerwidget in childWidgets.EnumerateArray())
-                        {
-                            if (!innerwidget.TryGetProperty("labels", out var labelsWidget) ||
-                                !labelsWidget.TryGetProperty("nodes", out var labelNodes))
-                            {
-                                continue;
-                            }
-
-                            foreach (var label in labelNodes.EnumerateArray())
-                            {
-                                var title = label.GetProperty("title").GetString()?.ToLowerInvariant();
-
-                                if (string.IsNullOrWhiteSpace(title))
-                                {
-                                    continue;
-                                }
-
-                                if (int.TryParse(title, out var point))
-                                {
-                                    childIssue.Points = point;
-                                }
-                                if (title == "prio low" || title == "prio medium" || title == "prio high" || title == "prio critical")
-                                {
-                                    childIssue.Priority = title.Replace("prio ", "");
-                                }
-                                if (title == "ui/ux" || title == "backend" || title == "frontend" || title == "devops")
-                                {
-                                    childIssue.Team = title;
-                                }
-                                if (title == "active sprint" || title == "in progress" || title == "resolved")
-                                {
-                                    childIssue.Status = title;
-                                }
-                            }
-                        }
-                        newIssue.ChildIssues.Add(childIssue);
-
-                        if (issueMilestone != null)
-                        {
-                            issueMilestone.TotalPoints += childIssue.Points;
-
-                            if (string.Equals(childIssue.State, "closed", StringComparison.OrdinalIgnoreCase))
-                                issueMilestone.CompletedPoints += childIssue.Points;
-                        }
-
-                    }
+                    foreach (var error in graphQlResponse.errors)
+                        Console.WriteLine(error.message);
+                    break;
                 }
 
-                allIssues.Add(newIssue);
+                issues = issueService.GetIssues(graphQlResponse);
+
+                // Filter to only issues in open milestones
+                filteredIssues = issues.Where(i => i.inMilestoneWithId.HasValue && openMilestoneIds.Contains(i.inMilestoneWithId.Value)).ToList();
+                allIssues.AddRange(filteredIssues);
+
+                hasNextPage = Pager.ExtractHasNextPage(graphQlResponse);
+                endCursor = Pager.ExtractEndCursor(graphQlResponse);
             }
 
-            var childIssueIds = allIssues
-                .SelectMany(x => x.ChildIssues)
-                .Select(x => x.Id)
-                .ToHashSet();
+            var issueList = allIssues;
 
-            //Printer.PrintByMilestone(milestoneList);
-            Printer.PrintIssuesWithoutMilestone(
-                allIssues.Where(x => x.inMilestoneWithId == null && !childIssueIds.Contains(x.Id)).ToList()
-            );
+            linkService.LinkIssuesToMilestones(issueList, milestoneList);
+
+            await milestoneService.SaveClosedMilestonesAsync(milestoneList);
+            await issueService.SaveIssuesAsync(issueList);
+
+            var allChildIssues = issueList.SelectMany(i => i.ChildIssues).ToList();
+
+            await issueService.SaveChildIssuesAsync(allChildIssues);
+
+            var context = scopedProvider.GetRequiredService<ScrummerQLDbContext>();
+            var printer = new Printer(context);
+
+            printer.PrintByMilestone(milestoneList);
         }
+
+        
     }
 }

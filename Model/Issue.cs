@@ -7,6 +7,7 @@ namespace ScrummerQL.Model
     internal class Issue
     {
         public int Id { get; set; }
+        public int GitLabIId { get; set; }
         public string Title { get; set; }
 
         public string State { get; set; }
