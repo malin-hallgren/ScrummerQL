@@ -19,13 +19,10 @@ namespace ScrummerQL
         {
             var (token, gitlabUrl, connectionString) = EnvConfig.Config();
 
-            Console.WriteLine($"GitLab URL: {gitlabUrl}");
-            Console.WriteLine($"Token length: {token?.Length ?? 0}");
-
             string query = $$"""
             query {
               project(fullPath: "{{gitlabUrl}}") {
-                milestones(first: 10) {
+                milestones(first: 5, state: active) {
                   nodes {
                     iid
                     title
@@ -48,6 +45,7 @@ namespace ScrummerQL
                         milestone {
                           iid
                           title
+                          state
                         }
                       }
                       ... on WorkItemWidgetHierarchy {
@@ -137,12 +135,22 @@ namespace ScrummerQL
 
             var milestoneList = milestoneService.GetMilestones(graphQlResponse);
 
+            // Filter to only non-expired milestones
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var openMilestoneList = milestoneList.Where(m => !m.EndDate.HasValue || m.EndDate >= today).ToList();
+
+
             var allIssues = new List<Issue>();
             var issues = issueService.GetIssues(graphQlResponse);
-            allIssues.AddRange(issues);
 
-            string? endCursor = ExtractEndCursor(graphQlResponse);
-            bool hasNextPage = ExtractHasNextPage(graphQlResponse);
+            // Filter to only issues in the milestone
+            var openMilestoneIds = openMilestoneList.Select(m => m.GitLabIId).ToHashSet();
+            var filteredIssues = issues.Where(i => i.inMilestoneWithId.HasValue && openMilestoneIds.Contains(i.inMilestoneWithId.Value)).ToList();
+
+            allIssues.AddRange(filteredIssues);
+
+            string? endCursor = Pager.ExtractEndCursor(graphQlResponse);
+            bool hasNextPage = Pager.ExtractHasNextPage(graphQlResponse);
 
             while (hasNextPage)
             {
@@ -166,10 +174,13 @@ namespace ScrummerQL
                 }
 
                 issues = issueService.GetIssues(graphQlResponse);
-                allIssues.AddRange(issues);
 
-                hasNextPage = ExtractHasNextPage(graphQlResponse);
-                endCursor = ExtractEndCursor(graphQlResponse);
+                // Filter to only issues in open milestones
+                filteredIssues = issues.Where(i => i.inMilestoneWithId.HasValue && openMilestoneIds.Contains(i.inMilestoneWithId.Value)).ToList();
+                allIssues.AddRange(filteredIssues);
+
+                hasNextPage = Pager.ExtractHasNextPage(graphQlResponse);
+                endCursor = Pager.ExtractEndCursor(graphQlResponse);
             }
 
             var issueList = allIssues;
@@ -183,17 +194,12 @@ namespace ScrummerQL
 
             await issueService.SaveChildIssuesAsync(allChildIssues);
 
-            Printer.PrintByMilestone(milestoneList);
+            var context = scopedProvider.GetRequiredService<ScrummerQLDbContext>();
+            var printer = new Printer(context);
+
+            printer.PrintByMilestone(milestoneList);
         }
 
-        private static bool ExtractHasNextPage(GraphQLResponse? response)
-        {
-            return response?.data?.project?.workItems?.pageInfo?.hasNextPage ?? false;
-        }
-
-        private static string? ExtractEndCursor(GraphQLResponse? response)
-        {
-            return response?.data?.project?.workItems?.pageInfo?.endCursor;
-        }
+        
     }
 }
