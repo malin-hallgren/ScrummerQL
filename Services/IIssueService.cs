@@ -9,6 +9,6 @@ namespace ScrummerQL.Services
     {
         List<Issue> GetIssues(GraphQLResponse response);
         Task SaveIssuesAsync(List<Issue> issues);
-        Task SaveChildIssuesAsync(List<Issue> issues);
+        Task SaveChildIssuesAsync(List<ChildIssue> childIssues);
     }
 }

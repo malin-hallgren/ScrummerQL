@@ -16,7 +16,10 @@ namespace ScrummerQL
                 ".env"
             );
 
-            string[] env = File.ReadAllLines(envPath);
+            var fullPath = Path.GetFullPath(envPath);
+            string[] env = File.ReadAllLines(fullPath);
+
+
             string? token = null;
             string? gitlabUrl = null;
             string connectionString = null;
@@ -41,7 +44,7 @@ namespace ScrummerQL
                 }
             }
 
-            return (token, gitlabUrl, connectionString);
+            return (token ?? string.Empty, gitlabUrl ?? string.Empty, connectionString ?? string.Empty);
         }
         
     }

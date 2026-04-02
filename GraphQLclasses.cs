@@ -38,6 +38,13 @@ namespace ScrummerQL
     public class WorkItems
     {
         public List<WorkItemNode>? nodes { get; set; }
+        public PageInfo? pageInfo { get; set; }
+    }
+
+    public class PageInfo
+    {
+        public bool hasNextPage { get; set; }
+        public string? endCursor { get; set; }
     }
 
     public class WorkItemNode

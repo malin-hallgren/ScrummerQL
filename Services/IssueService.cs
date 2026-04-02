@@ -174,7 +174,7 @@ namespace ScrummerQL.Services
             }
         }
 
-        public async Task SaveChildIssuesAsync(List<Issue> issues)
+        public async Task SaveChildIssuesAsync(List<ChildIssue> childIssues)
         {
             if (_repository == null)
             {
@@ -183,19 +183,13 @@ namespace ScrummerQL.Services
 
             var allChildIssues = new List<ChildIssue>();
 
-            foreach (var issue in issues)
+            foreach (var childIssue in childIssues)
             {
-                if (issue.ChildIssues == null || issue.ChildIssues.Count == 0)
-                    continue;
-
-                foreach (var childIssue in issue.ChildIssues)
+                var parentIssue = await _repository.GetByGitLabIIdAsync(childIssue.ParentIssueGitLabIId.Value);
+                if (parentIssue != null)
                 {
-                    var parentIssue = await _repository.GetByGitLabIIdAsync(childIssue.ParentIssueGitLabIId.Value);
-                    if (parentIssue != null)
-                    {
-                        childIssue.ParentIssueId = parentIssue.Id;
-                        allChildIssues.Add(childIssue);
-                    }
+                    childIssue.ParentIssueId = parentIssue.Id;
+                    allChildIssues.Add(childIssue);
                 }
             }
 

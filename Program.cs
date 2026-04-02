@@ -19,6 +19,9 @@ namespace ScrummerQL
         {
             var (token, gitlabUrl, connectionString) = EnvConfig.Config();
 
+            Console.WriteLine($"GitLab URL: {gitlabUrl}");
+            Console.WriteLine($"Token length: {token?.Length ?? 0}");
+
             string query = $$"""
             query {
               project(fullPath: "{{gitlabUrl}}") {
@@ -32,6 +35,10 @@ namespace ScrummerQL
                   }
                 }
                 workItems(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                   nodes {
                     iid
                     title
@@ -80,7 +87,14 @@ namespace ScrummerQL
 
             services.AddDbContext<ScrummerQLDbContext>((options) =>
             {
-                options.UseSqlServer(connectionString);
+                options.UseSqlServer(connectionString, sqlServerOptionsAction =>
+                {
+                    sqlServerOptionsAction.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorNumbersToAdd: null
+                    );
+                });
             });
 
             services.AddScoped<IIssueRepository, IssueRepository>();
@@ -99,7 +113,6 @@ namespace ScrummerQL
 
             var json = await qlHandler.GetResponseAsync(query, token);
 
-
             if (string.IsNullOrWhiteSpace(json))
             {
                 Console.WriteLine("Empty response returned from GraphQL.");
@@ -107,6 +120,12 @@ namespace ScrummerQL
             }
 
             GraphQLResponse? graphQlResponse = QLResponseValidator.ValidateResponse(json);
+
+            if (graphQlResponse == null)
+            {
+                Console.WriteLine("Failed to deserialize GraphQL response.");
+                return;
+            }
 
             if (graphQlResponse.errors != null)
             {
@@ -117,7 +136,43 @@ namespace ScrummerQL
             }
 
             var milestoneList = milestoneService.GetMilestones(graphQlResponse);
-            var issueList = issueService.GetIssues(graphQlResponse);
+
+            var allIssues = new List<Issue>();
+            var issues = issueService.GetIssues(graphQlResponse);
+            allIssues.AddRange(issues);
+
+            string? endCursor = ExtractEndCursor(graphQlResponse);
+            bool hasNextPage = ExtractHasNextPage(graphQlResponse);
+
+            while (hasNextPage)
+            {
+                string paginatedQuery = query.Replace("workItems(first: 100)", $"workItems(first: 100, after: \"{endCursor}\")");
+
+                json = await qlHandler.GetResponseAsync(paginatedQuery, token);
+
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    Console.WriteLine("Empty response returned from GraphQL.");
+                    break;
+                }
+
+                graphQlResponse = QLResponseValidator.ValidateResponse(json);
+
+                if (graphQlResponse.errors != null)
+                {
+                    foreach (var error in graphQlResponse.errors)
+                        Console.WriteLine(error.message);
+                    break;
+                }
+
+                issues = issueService.GetIssues(graphQlResponse);
+                allIssues.AddRange(issues);
+
+                hasNextPage = ExtractHasNextPage(graphQlResponse);
+                endCursor = ExtractEndCursor(graphQlResponse);
+            }
+
+            var issueList = allIssues;
 
             linkService.LinkIssuesToMilestones(issueList, milestoneList);
 
@@ -126,9 +181,19 @@ namespace ScrummerQL
 
             var allChildIssues = issueList.SelectMany(i => i.ChildIssues).ToList();
 
-            await issueService.SaveChildIssuesAsync(issueList);
+            await issueService.SaveChildIssuesAsync(allChildIssues);
 
             Printer.PrintByMilestone(milestoneList);
+        }
+
+        private static bool ExtractHasNextPage(GraphQLResponse? response)
+        {
+            return response?.data?.project?.workItems?.pageInfo?.hasNextPage ?? false;
+        }
+
+        private static string? ExtractEndCursor(GraphQLResponse? response)
+        {
+            return response?.data?.project?.workItems?.pageInfo?.endCursor;
         }
     }
 }
