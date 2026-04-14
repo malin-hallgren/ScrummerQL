@@ -51,7 +51,7 @@ namespace ScrummerQL.Services
 
             foreach (var milestone in milestones)
             {
-                if (milestone.EndDate.HasValue && milestone.EndDate < DateOnly.FromDateTime(DateTime.Now))
+                if (milestone.EndDate.HasValue && milestone.EndDate <= DateOnly.FromDateTime(DateTime.Now))
                 {
                     if (!await _repository.ExistsByGitLabIIdAsync(milestone.GitLabIId))
                     {
